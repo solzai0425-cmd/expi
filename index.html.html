@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Vertical Video Feed</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&amp;display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; font-family: 'Outfit', sans-serif; }
+
+    .feed-container {
+      height: 100%;
+      overflow-y: scroll;
+      scroll-snap-type: y mandatory;
+      -webkit-overflow-scrolling: touch;
+      scroll-behavior: smooth;
+    }
+
+    .video-slide {
+      height: 100%;
+      width: 100%;
+      scroll-snap-align: start;
+      scroll-snap-stop: always;
+      position: relative;
+      flex-shrink: 0;
+      background: #000;
+    }
+
+    .video-slide video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .video-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(transparent 60%, rgba(0,0,0,0.5) 100%);
+    }
+
+    .video-error-msg {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #888;
+      gap: 12px;
+      background: #0a0a0a;
+    }
+
+    .play-indicator {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%,-50%) scale(0);
+      width: 64px; height: 64px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.15);
+      backdrop-filter: blur(8px);
+      display: flex; align-items: center; justify-content: center;
+      transition: transform 0.2s ease, opacity 0.3s ease;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .play-indicator.show {
+      transform: translate(-50%,-50%) scale(1);
+      opacity: 1;
+    }
+    .play-indicator.hide-anim {
+      transform: translate(-50%,-50%) scale(1.3);
+      opacity: 0;
+    }
+
+    .feed-header {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 50;
+      padding: 16px 20px;
+      background: linear-gradient(rgba(0,0,0,0.6), transparent);
+      pointer-events: none;
+    }
+
+    .video-counter {
+      position: fixed;
+      bottom: 20px; right: 20px;
+      z-index: 50;
+      background: rgba(0,0,0,0.5);
+      backdrop-filter: blur(8px);
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      pointer-events: none;
+    }
+
+    .progress-bar {
+      position: fixed;
+      top: 0; left: 0;
+      z-index: 60;
+      height: 3px;
+      background: #e44;
+      transition: width 0.3s ease;
+    }
+
+    .loading-spinner {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      width: 36px; height: 36px;
+      border: 3px solid rgba(255,255,255,0.15);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: translate(-50%,-50%) rotate(360deg); } }
+
+    .side-actions {
+      position: absolute;
+      right: 14px;
+      bottom: 80px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      z-index: 20;
+    }
+    .side-btn {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.12);
+      backdrop-filter: blur(6px);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      transition: transform 0.15s ease, background 0.15s ease;
+      border: none; color: #fff;
+    }
+    .side-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.1); }
+    .side-btn.liked { background: rgba(230,50,50,0.6); }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+  <style>body { box-sizing: border-box; }</style>
+  <script src="/_sdk/data_sdk.js" type="text/javascript"></script>
+ </head>
+ <body class="h-full bg-black">
+  <div class="progress-bar" id="progressBar" style="width:0%"></div>
+  <header class="feed-header" id="feedHeader">
+   <h1 id="feedTitle" class="text-white text-lg font-bold tracking-tight" style="text-shadow: 0 1px 6px rgba(0,0,0,0.5)">Video Feed</h1>
+  </header>
+  <div class="feed-container" id="feedContainer"></div>
+  <div class="video-counter" id="videoCounter">
+   1 / 0
+  </div>
+  <script>
+    // ── VIDEO DATA (50+ videos) ──
+    // Replace these URLs with your Supabase Storage public URLs:
+    // Format: https://your-project.supabase.co/storage/v1/object/public/bucket-name/video-name.mp4
+    const VIDEOS = [
+      { id: 1, src: "https://fctcaozhckdfggczcxoo.supabase.co/storage/v1/object/sign/test/373c765e04223cd0f6ec7abbf4e3a8bf.mp4?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV8zMTRjY2ZjMy0zNDk4LTQ4MWQtODk3MC1lMjk4MjVkY2RlNGQiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJ0ZXN0LzM3M2M3NjVlMDQyMjNjZDBmNmVjN2FiYmY0ZTNhOGJmLm1wNCIsImlhdCI6MTc3NzE0MzQ3MSwiZXhwIjoxNzc5NzM1NDcxfQ.3_fucgPoC3SWm0NeTNwHi8pk6sXDTshG33qWBrUC5aE", title: "Blazing Skies", duration: "0:15" },
+      { id: 2, src: "https://fctcaozhckdfggczcxoo.supabase.co/storage/v1/object/sign/test/3a3d53001abd7f617dc1fb90ef9aed0d.mp4?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV8zMTRjY2ZjMy0zNDk4LTQ4MWQtODk3MC1lMjk4MjVkY2RlNGQiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJ0ZXN0LzNhM2Q1MzAwMWFiZDdmNjE3ZGMxZmI5MGVmOWFlZDBkLm1wNCIsImlhdCI6MTc3NzE0MzQ5NSwiZXhwIjoxNzc5NzM1NDk1fQ.iK9d4hV50XZ1DPwGL0OjhpSaodLmnllPZ2GYbD5iC30", title: "Great Escape", duration: "0:15" },
+      { id: 3, src: "https://fctcaozhckdfggczcxoo.supabase.co/storage/v1/object/sign/test/6bf683990db1b4daac48b6d2260aa7c2.mp4?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV8zMTRjY2ZjMy0zNDk4LTQ4MWQtODk3MC1lMjk4MjVkY2RlNGQiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJ0ZXN0LzZiZjY4Mzk5MGRiMWI0ZGFhYzQ4YjZkMjI2MGFhN2MyLm1wNCIsImlhdCI6MTc3NzE0MzUwNiwiZXhwIjoxNzc5NzM1NTA2fQ.Nw76lvw9btbODscMj8WJgchr_jkzENwI2hktB8NRIY0", title: "Fun Times", duration: "0:15" },
+      { id: 4, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4", title: "Joyride", duration: "0:15" },
+      { id: 5, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4", title: "Meltdown", duration: "0:15" },
+      { id: 6, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4", title: "Sintel", duration: "0:15" },
+      { id: 7, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4", title: "Subaru", duration: "0:15" },
+      { id: 8, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4", title: "Tears of Steel", duration: "0:15" },
+      { id: 9, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", title: "Fire & Passion", duration: "0:15" },
+      { id: 10, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4", title: "Wanderlust", duration: "0:15" },
+      { id: 11, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4", title: "Pure Joy", duration: "0:15" },
+      { id: 12, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4", title: "Adventure Rush", duration: "0:15" },
+      { id: 13, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4", title: "Emotional", duration: "0:15" },
+      { id: 14, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4", title: "Animation Magic", duration: "0:15" },
+      { id: 15, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4", title: "Off-Road", duration: "0:15" },
+      { id: 16, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4", title: "Epic Story", duration: "0:15" },
+      { id: 17, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", title: "Firestorm", duration: "0:15" },
+      { id: 18, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4", title: "Escape Plan", duration: "0:15" },
+      { id: 19, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4", title: "Good Times", duration: "0:15" },
+      { id: 20, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4", title: "Thrills Galore", duration: "0:15" },
+      { id: 21, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4", title: "Meltdown 2.0", duration: "0:15" },
+      { id: 22, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4", title: "Digital Art", duration: "0:15" },
+      { id: 23, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4", title: "Explorer Mode", duration: "0:15" },
+      { id: 24, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4", title: "Cinematic", duration: "0:15" },
+      { id: 25, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", title: "Heat Wave", duration: "0:15" },
+      { id: 26, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4", title: "Freedom Call", duration: "0:15" },
+      { id: 27, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4", title: "Smile Vibes", duration: "0:15" },
+      { id: 28, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4", title: "Ride On", duration: "0:15" },
+      { id: 29, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4", title: "Drama Unfolds", duration: "0:15" },
+      { id: 30, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4", title: "Visual Journey", duration: "0:15" },
+      { id: 31, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4", title: "Nature's Call", duration: "0:15" },
+      { id: 32, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4", title: "Blockbuster", duration: "0:15" },
+      { id: 33, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", title: "Inferno", duration: "0:15" },
+      { id: 34, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4", title: "Breakaway", duration: "0:15" },
+      { id: 35, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4", title: "Party Time", duration: "0:15" },
+      { id: 36, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4", title: "Speed Rush", duration: "0:15" },
+      { id: 37, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4", title: "Feels Deep", duration: "0:15" },
+      { id: 38, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4", title: "Render Life", duration: "0:15" },
+      { id: 39, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4", title: "Wild Terrain", duration: "0:15" },
+      { id: 40, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4", title: "Feature Film", duration: "0:15" },
+      { id: 41, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", title: "Blaze On", duration: "0:15" },
+      { id: 42, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4", title: "Getaway", duration: "0:15" },
+      { id: 43, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4", title: "Laughs Only", duration: "0:15" },
+      { id: 44, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4", title: "Loop De Loop", duration: "0:15" },
+      { id: 45, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4", title: "Emotional Ride", duration: "0:15" },
+      { id: 46, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4", title: "CGI Wonder", duration: "0:15" },
+      { id: 47, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4", title: "Muddy Adventure", duration: "0:15" },
+      { id: 48, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4", title: "Premium Content", duration: "0:15" },
+      { id: 49, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", title: "Fire Rising", duration: "0:15" },
+      { id: 50, src: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4", title: "Final Escape", duration: "0:15" },
+    ];
+
+    // ── STATE ──
+    let currentIndex = 0;
+    let likes = {};
+    let activeVideo = null;
+
+    const container = document.getElementById('feedContainer');
+    const counter = document.getElementById('videoCounter');
+    const progressBar = document.getElementById('progressBar');
+
+    // ── BUILD SLIDES ──
+    VIDEOS.forEach((v, i) => {
+      const slide = document.createElement('div');
+      slide.className = 'video-slide';
+      slide.dataset.index = i;
+      slide.innerHTML = `
+        <div class="loading-spinner" data-loader="${i}"></div>
+        <video
+          loop playsinline
+          preload="none"
+          crossorigin="anonymous"
+          data-src="${v.src}"
+          data-idx="${i}"
+          style="opacity:0; transition: opacity 0.4s ease"
+        ></video>
+        <div class="video-overlay"></div>
+        <div class="play-indicator" data-play="${i}">
+          <i data-lucide="pause" style="width:28px;height:28px;color:#fff"></i>
+        </div>
+        <div class="side-actions">
+          <button class="side-btn" data-like="${i}" aria-label="Like">
+            <i data-lucide="heart" style="width:22px;height:22px"></i>
+          </button>
+          <button class="side-btn" data-share="${i}" aria-label="Share">
+            <i data-lucide="share-2" style="width:20px;height:20px"></i>
+          </button>
+          <button class="side-btn" data-mute="${i}" aria-label="Mute toggle">
+            <i data-lucide="volume-x" style="width:20px;height:20px"></i>
+          </button>
+        </div>
+        <div style="position:absolute;bottom:24px;left:16px;right:70px;z-index:20;color:#fff;pointer-events:none;">
+          <p style="font-weight:700;font-size:15px;text-shadow:0 1px 4px rgba(0,0,0,0.6);margin:0">${v.title}</p>
+        </div>
+        <div class="video-error-msg" data-error="${i}" style="display:none">
+          <i data-lucide="alert-circle" style="width:40px;height:40px"></i>
+          <span style="font-size:14px">Video unavailable</span>
+        </div>
+      `;
+      container.appendChild(slide);
+    });
+
+    lucide.createIcons();
+
+    // ── LAZY LOADING + AUTOPLAY ──
+    function loadVideo(idx) {
+      const vid = container.querySelector(`video[data-idx="${idx}"]`);
+      if (!vid || vid.src) return vid;
+      vid.src = vid.dataset.src;
+      vid.load();
+      console.log(`[Feed] Loading video ${idx}: ${VIDEOS[idx].title}`);
+
+      vid.addEventListener('canplay', () => {
+        vid.style.opacity = '1';
+        const loader = container.querySelector(`[data-loader="${idx}"]`);
+        if (loader) loader.style.display = 'none';
+      }, { once: true });
+
+      vid.addEventListener('error', () => {
+        console.error(`[Feed] Error loading video ${idx}: ${vid.dataset.src}`);
+        vid.style.display = 'none';
+        const loader = container.querySelector(`[data-loader="${idx}"]`);
+        if (loader) loader.style.display = 'none';
+        const err = container.querySelector(`[data-error="${idx}"]`);
+        if (err) err.style.display = 'flex';
+      });
+
+      return vid;
+    }
+
+    function playVideo(idx) {
+      if (activeVideo !== null && activeVideo !== idx) {
+        const prev = container.querySelector(`video[data-idx="${activeVideo}"]`);
+        if (prev) prev.pause();
+      }
+      const vid = loadVideo(idx);
+      if (vid && vid.src && !vid.error) {
+        vid.play().catch(() => {});
+        activeVideo = idx;
+      }
+      // Preload neighbors
+      if (idx + 1 < VIDEOS.length) loadVideo(idx + 1);
+      if (idx - 1 >= 0) loadVideo(idx - 1);
+    }
+
+    // ── INTERSECTION OBSERVER ──
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        const idx = parseInt(e.target.dataset.index);
+        if (e.isIntersecting && e.intersectionRatio > 0.6) {
+          currentIndex = idx;
+          playVideo(idx);
+          counter.textContent = `${idx + 1} / ${VIDEOS.length}`;
+          progressBar.style.width = `${((idx + 1) / VIDEOS.length) * 100}%`;
+        } else {
+          const vid = container.querySelector(`video[data-idx="${idx}"]`);
+          if (vid) vid.pause();
+        }
+      });
+    }, { root: container, threshold: [0.6] });
+
+    container.querySelectorAll('.video-slide').forEach(s => observer.observe(s));
+
+    // Load first video immediately
+    loadVideo(0);
+    playVideo(0);
+    counter.textContent = `1 / ${VIDEOS.length}`;
+
+    // ── TAP TO PAUSE/PLAY ──
+    container.addEventListener('click', (e) => {
+      const slide = e.target.closest('.video-slide');
+      if (!slide) return;
+      if (e.target.closest('.side-btn')) return;
+
+      const idx = parseInt(slide.dataset.index);
+      const vid = container.querySelector(`video[data-idx="${idx}"]`);
+      if (!vid || !vid.src) return;
+
+      const indicator = container.querySelector(`[data-play="${idx}"]`);
+      if (vid.paused) {
+        vid.play().catch(() => {});
+        if (indicator) {
+          indicator.querySelector('i').setAttribute('data-lucide', 'pause');
+          lucide.createIcons();
+          indicator.className = 'play-indicator show';
+          setTimeout(() => indicator.className = 'play-indicator hide-anim', 400);
+          setTimeout(() => indicator.className = 'play-indicator', 700);
+        }
+      } else {
+        vid.pause();
+        if (indicator) {
+          indicator.querySelector('i').setAttribute('data-lucide', 'play');
+          lucide.createIcons();
+          indicator.className = 'play-indicator show';
+        }
+      }
+    });
+
+    // ── SIDE BUTTONS ──
+    container.addEventListener('click', (e) => {
+      const likeBtn = e.target.closest('[data-like]');
+      if (likeBtn) {
+        const idx = likeBtn.dataset.like;
+        likes[idx] = !likes[idx];
+        likeBtn.classList.toggle('liked', likes[idx]);
+        return;
+      }
+      const muteBtn = e.target.closest('[data-mute]');
+      if (muteBtn) {
+        const idx = parseInt(muteBtn.dataset.mute);
+        const vid = container.querySelector(`video[data-idx="${idx}"]`);
+        if (vid) {
+          vid.muted = !vid.muted;
+          muteBtn.querySelector('i').setAttribute('data-lucide', vid.muted ? 'volume-x' : 'volume-2');
+          lucide.createIcons();
+        }
+      }
+    });
+
+    // ── ELEMENT SDK ──
+    const defaultConfig = {
+      feed_title: "Video Feed",
+      background_color: "#000000",
+      accent_color: "#e44444",
+      text_color: "#ffffff",
+      surface_color: "#1a1a1a",
+      font_family: "Outfit",
+      font_size: 16
+    };
+
+    function applyConfig(config) {
+      const title = config.feed_title || defaultConfig.feed_title;
+      const accent = config.accent_color || defaultConfig.accent_color;
+      const textCol = config.text_color || defaultConfig.text_color;
+      const font = config.font_family || defaultConfig.font_family;
+      const size = config.font_size || defaultConfig.font_size;
+
+      document.getElementById('feedTitle').textContent = title;
+      document.getElementById('feedTitle').style.fontFamily = `${font}, sans-serif`;
+      document.getElementById('feedTitle').style.fontSize = `${size * 1.15}px`;
+      document.getElementById('feedTitle').style.color = textCol;
+      progressBar.style.background = accent;
+    }
+
+    window.elementSdk.init({
+      defaultConfig,
+      onConfigChange: async (config) => applyConfig(config),
+      mapToCapabilities: (config) => ({
+        recolorables: [
+          { get: () => config.background_color || defaultConfig.background_color, set: (v) => { config.background_color = v; window.elementSdk.setConfig({ background_color: v }); } },
+          { get: () => config.surface_color || defaultConfig.surface_color, set: (v) => { config.surface_color = v; window.elementSdk.setConfig({ surface_color: v }); } },
+          { get: () => config.text_color || defaultConfig.text_color, set: (v) => { config.text_color = v; window.elementSdk.setConfig({ text_color: v }); } },
+          { get: () => config.accent_color || defaultConfig.accent_color, set: (v) => { config.accent_color = v; window.elementSdk.setConfig({ accent_color: v }); } },
+        ],
+        borderables: [],
+        fontEditable: { get: () => config.font_family || defaultConfig.font_family, set: (v) => { config.font_family = v; window.elementSdk.setConfig({ font_family: v }); } },
+        fontSizeable: { get: () => config.font_size || defaultConfig.font_size, set: (v) => { config.font_size = v; window.elementSdk.setConfig({ font_size: v }); } },
+      }),
+      mapToEditPanelValues: (config) => new Map([
+        ["feed_title", config.feed_title || defaultConfig.feed_title]
+      ])
+    });
+
+    console.log(`[Feed] Initialized with ${VIDEOS.length} videos`);
+  </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9f1f92d5a7dcfec0',t:'MTc3NzE0MzQ0OC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
